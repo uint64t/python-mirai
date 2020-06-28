@@ -11,6 +11,10 @@ from mirai.image import (
 )
 from mirai.logger import Protocol as ProtocolLogger
 from aiohttp import ClientSession
+from PIL import Image as PILImage
+import webp
+import magic
+import requests
 import datetime
 
 __all__ = [
@@ -129,17 +133,33 @@ class Image(BaseMessageComponent):
         return f"{{{self.imageId}}}.mirai"
 
     def asFriendImage(self) -> str:
-        return self.imageId.upper()
+        return f"{self.imageId.lower()}"
 
     def asFlashImage(self) -> "FlashImage":
         return FlashImage(self.imageId, self.url)
 
     @staticmethod
-    async def fromRemote(url, **extra) -> BytesImage:
-        async with ClientSession() as session:
-            async with session.get(url, **extra) as response:
-                return BytesImage(await response.read())
+    def fromRemote(url, **extra) -> BytesImage:
+        r = requests.get(url)
+        describe = magic.from_buffer(r.content)
+        content = r.content
+        if 'image' not in describe:
+            raise ValueError("the content in URL isn't image")
+        elif 'Web/P' in describe:
+            webp_data = webp.WebPData.from_buffer(r.content)
+            arr = webp_data.decode(color_mode=webp.WebPColorMode.BGR)
+            content = BytesIO()
+            PILImage.fromarray(arr).save(content, "JPEG")
+            content = content.getvalue()
+        return BytesImage(content)
 
+    # Afore code. Using coroutine and aiohttp method. 
+    # Seems to have some trouble with send image from Remote URL.
+    # @staticmethod
+    # async def fromRemote(url, **extra) -> BytesImage:
+    #    async with ClientSession() as session:
+    #        async with session.get(url, **extra) as response:
+    #            return BytesImage(await response.read())
     @staticmethod
     def fromFileSystem(path: T.Union[Path, str]) -> LocalImage:
         return LocalImage(path)
@@ -226,10 +246,10 @@ class FlashImage(BaseMessageComponent):
         return f"[FlashImage::{self.imageId}]"
 
     def asGroupImage(self) -> str:
-        return f"{{{self.imageId.upper()}}}.mirai"
+        return f"{{{self.imageId.upper()}}}.jpg"
 
     def asFriendImage(self) -> str:
-        return self.imageId.upper()
+        return f"/{self.imageId.lower()}"
 
     def asNormal(self) -> Image:
         return Image(self.imageId, self.url)
